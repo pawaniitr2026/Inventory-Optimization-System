@@ -1,101 +1,190 @@
-# DemandShield AI — Agentic Demand Forecasting Under Demand Shocks
+# 📦 Inventory Optimization System
 
-A Visual Studio Code starter project combining classical forecasting, statistical uncertainty monitoring, and a LangGraph multi-agent inventory planning workflow.
+**Agentic Demand Forecasting • Shock-Aware Uncertainty Analysis • Deterministic Replenishment Planning**
 
-## Features
+An end-to-end supply chain decision-support application built with **Streamlit**, **statsmodels**, **scikit-learn**, and **LangGraph**. The system ingests daily historical sales data (such as the included `Walmart_customized.csv` or generated synthetic demand series), benchmarks classical time-series models via chronological holdout validation, detects demand shocks and volatility spikes, and orchestrates a three-agent workflow to compute auditable safety stock and reorder point recommendations.
 
-- Daily demand upload through Streamlit (CSV).
-- Synthetic demo dataset with seasonality, trend, noise, and injected demand spikes.
-- Classical baseline comparison: 7-day seasonal naive, 14-day moving average, and exponential smoothing.
-- Chronological holdout metrics: MAE, RMSE, MAPE.
-- Empirical residual forecast interval.
-- LangGraph sequence: **Forecast Agent → Uncertainty Agent → Inventory Planner Agent**.
-- Optional LangChain chat model for explanatory text via OpenRouter or OpenAI.
-- Deterministic inventory calculations remain independent of the LLM narrative.
-- Downloadable future forecast CSV.
+---
 
-## 1. Requirements
+## 1. Prerequisites & Dependencies
 
-- Python 3.10 or 3.11 recommended
-- Visual Studio Code
-- Internet only for package installation and optional LLM API calls
+### System Requirements
+* **Python:** `3.9` or higher (recommended: `3.10` or `3.11`)
+* **IDE:** **Visual Studio Code (VS Code)** with the official **Python** extension (`ms-python.python`)
 
-## 2. Setup in VS Code (Windows PowerShell)
+### Installing Dependencies via `requirements.txt`
+Your workspace already includes a `venv/` virtual environment and a `requirements.txt` file. Activate your virtual environment in the VS Code terminal and install all required packages:
 
-```powershell
-cd demand_shock_agentic_forecasting
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+```bash
+# Windows (PowerShell / Command Prompt)
+.\venv\Scripts\activate
 pip install -r requirements.txt
-Copy-Item .env.example .env
+
+# macOS / Linux
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Open `.env` and optionally add your `OPENROUTER_API_KEY`. The app works without a key using deterministic fallback text. Do not commit `.env` or expose API keys.
+*(Core packages include `streamlit`, `pandas`, `numpy`, `scikit-learn`, `statsmodels`, and optional agent orchestration libraries `langgraph`, `langchain-openai`, and `langchain-core`.)*
 
-## 3. Run
+### Environment Variables (`.env`)
+All quantitative metrics, shock ratios, safety stock quantities, and reorder points are computed deterministically in Python/NumPy. To enable optional AI-generated natural language explanations (`temperature=0`), populate your root `.env` file:
 
-```powershell
-streamlit run app.py
+```env
+OPENAI_API_KEY="your-openai-api-key"
+# Or use OpenRouter:
+# OPENROUTER_API_KEY="your-openrouter-api-key"
+# LLM_MODEL="openai/gpt-4o-mini"
 ```
 
-Streamlit will print a local URL, usually `http://localhost:8501`.
+---
 
-## 4. Input CSV format
+## 2. Project Structure & Key Modules
 
-Minimum columns:
+Your `Inventory-Optimization-System` workspace is organized as follows (`app.py` dynamically adds `src/` to `sys.path`):
 
-```csv
-date,sales
-2025-01-01,120
-2025-01-02,134
-2025-01-03,128
+```text
+Inventory-Optimization-System/
+├── .vscode/                   # Optional VS Code launch & debug configuration
+│   └── launch.json            # One-click F5 Streamlit debugging config
+├── backup/                    # Archived versions and backup scripts
+├── src/                       # Core analytical & multi-agent backend package
+│   ├── __init__.py            # Package initializer
+│   ├── agents.py              # LangGraph 3-agent orchestration & inventory policy math
+│   ├── data_utils.py          # Data ingestion, schema mapping, & synthetic data generator
+│   └── forecasting.py         # Chronological holdout forecasting & 95% confidence bounds
+├── venv/                      # Local Python virtual environment
+├── .env                       # API keys & environment configuration
+├── .gitignore                 # Git ignore rules (excludes venv/, __pycache__/, .env)
+├── app.py                     # Main Streamlit UI & application entry point
+├── README.md                  # Project documentation & VS Code setup guide
+├── requirements.txt           # Project Python dependencies
+└── Walmart_customized.csv     # Sample cleaned time-series sales dataset
 ```
 
-Accepted date column aliases: `date`, `ds`, `day`. Accepted sales aliases: `sales`, `demand`, `units_sold`, `quantity`, `y`.
+### Module Descriptions
 
-If the CSV contains multiple stores or items, this starter aggregates them to total daily demand. For item/store-level forecasts, filter to one series or extend the app to select a series before aggregation.
+1. **`app.py` (Presentation & Control Layer)**
+   * Configures the Streamlit enterprise theme, custom CSS cards, and sidebar configuration controls (CSV upload, demo history days, forecast horizon, supplier lead time, target service level, and shock scenario override).
+   * Organizes outputs into three interactive tabs: **Demand & Baseline Evaluation**, **Forecast & Uncertainty**, and **Agentic Inventory Planner**.
+   * Renders center-aligned, formatted HTML tables (`render_centered_table`) and provides one-click CSV export (`demand_forecast.csv`).
 
-## 5. Data sources
+2. **`src/data_utils.py` (Data Engineering & Normalization Layer)**
+   * `make_demo_data(days=540, seed=7)`: Generates a reproducible daily sales dataset featuring linear growth, weekday/weekend seasonality ($1.25\times$ weekend lift), annual sinusoidal seasonality, Gaussian noise, and two injected demand shock events.
+   * `prepare_daily_series(df)`: Detects common column aliases (`date`/`ds`/`day` and `sales`/`demand`/`units_sold`/`quantity`/`y`), aggregates multi-store/item volumes by date, enforces a continuous daily calendar (`asfreq("D")`), and imputes missing gaps via time-based linear interpolation.
+   * `load_sales_data(path)`: Convenience wrapper to read a CSV from disk and pass it through `prepare_daily_series()`.
 
-- M5 Forecasting: https://www.kaggle.com/competitions/m5-forecasting-accuracy
-- Walmart Sales: https://www.kaggle.com/datasets/yasserh/walmart-dataset
-- NOAA Climate Data Online: https://www.ncei.noaa.gov/
+3. **`src/forecasting.py` (Statistical Forecasting & Benchmarking Layer)**
+   * `_predict_all(train, horizon)`: Trains three baseline forecasters—**Seasonal Naive (7-day)**, **Moving Average (14-day)**, and **Additive Holt-Winters Exponential Smoothing**.
+   * `run_forecasts(daily, horizon=28)`: Splits historical observations chronologically (reserving up to 20% or `horizon` days for validation), selects the winning baseline by lowest holdout MAE, and constructs empirical 95% prediction intervals ($\hat{y}_t \pm 1.96 \cdot \sigma_{\text{res}}$).
+   * `evaluate_forecasts(actual, predictions)`: Computes and ranks **MAE**, **RMSE**, and **MAPE (%)** across all evaluated baselines.
 
-These datasets have different schemas and granularity. Normalize them to daily `date` and `sales` first. The included app accepts a normalized CSV; it does not automatically download Kaggle/NOAA datasets.
+4. **`src/agents.py` (Multi-Agent Reasoning & Inventory Optimization Layer)**
+   * `forecast_agent(state)`: Audits the selected baseline model and holdout error metrics, generating a cautious summary warning against uncritical extrapolation during regime shifts.
+   * `uncertainty_agent(state)`: Compares the trailing 28-day mean and Coefficient of Variation ($\text{CV}$) against the prior 62-day baseline window (days $-90$ to $-28$) to classify shock status (`Auto-detect` or manual scenario override).
+   * `inventory_planner_agent(state)`: Maps target service levels ($80\%$–$99\%$) to normal $z$-scores and calculates **Safety Stock** (applying a $1.25\times$ buffer multiplier when a shock or surge is active), **Reorder Point (ROP)**, and **Order-Up-To Level**.
+   * `run_agent_workflow(...)`: Compiles and executes the directed acyclic graph (`START → forecast_agent → uncertainty_agent → inventory_planner → END`) via LangGraph or sequential fallback.
 
-### Notes for M5
-M5 daily unit sales are wide-format (`d_1`, `d_2`, ...). Join the calendar table to map `d_n` to calendar dates, then melt the item/store series into a long table. Start with a single item/store to keep the first experiment manageable.
+5. **`Walmart_customized.csv` (Sample Dataset)**
+   * Ready-to-upload historical retail sales dataset formatted with standardized `date` and `sales` columns for testing real-world CSV ingestion in the Streamlit sidebar.
 
-### Notes for Walmart
-The common Walmart dataset is weekly, with columns such as `Date`, `Weekly_Sales`, `Store`, and `Dept`. Rename `Weekly_Sales` to `sales` and `Date` to `date`. The starter app resamples to daily and is best suited to daily data, so for a fair weekly Walmart evaluation, adapt the app to weekly frequency instead of interpolating weekly totals into daily values.
+---
 
-## 6. Agent design
+## 3. End-to-End Code Flow
 
-1. **Forecast Agent** — selects the best baseline using holdout MAE and explains the selected model.
-2. **Uncertainty Agent** — compares recent demand mean and variability against a historical reference window and labels possible shocks.
-3. **Inventory Planner Agent** — estimates lead-time demand, safety stock, reorder point, and order-up-to level.
+```text
+[Sidebar Inputs: Walmart_customized.csv / Parameters]
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ 1. Data Ingestion (src/data_utils.py)            │
+│    • Map date/sales aliases                      │
+│    • Aggregate & resample to daily frequency     │
+│    • Validate >= 60 daily observations           │
+└────────────────────────┬─────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ 2. Holdout Forecasting (src/forecasting.py)      │
+│    • Chronological train/test split              │
+│    • Benchmark 3 baseline models                 │
+│    • Select lowest-MAE model & 95% intervals     │
+└────────────────────────┬─────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ 3. Multi-Agent Pipeline (src/agents.py)          │
+│    • Forecast Agent (Model audit)                │
+│    • Uncertainty Agent (Shock/CV detection)      │
+│    • Inventory Planner (SS & ROP math)           │
+└────────────────────────┬─────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────┐
+│ 4. Streamlit UI (app.py)                         │
+│    • KPI Scorecards & Line Charts                │
+│    • Agent Cards & JSON Diagnostics              │
+│    • Downloadable Forecast CSV                   │
+└──────────────────────────────────────────────────┘
+```
 
-The workflow uses LangGraph state and sequential edges. LangChain's chat model is optional and only used for narrative generation. Forecast and inventory arithmetic are calculated in Python for repeatability.
+1. **Initialization & Ingestion:** On page load (or parameter change), `app.py` checks whether a CSV (such as `Walmart_customized.csv`) has been uploaded in the sidebar. If present, it parses and normalizes the file via `prepare_daily_series()`; otherwise, it generates synthetic data via `make_demo_data()`. Series with fewer than 60 daily records are halted with a user warning.
+2. **Baseline Training & KPI Display:** `run_forecasts()` and `evaluate_forecasts()` execute automatically, populating the top four KPI cards (*Best Baseline*, *Best Holdout MAE*, *Average Daily Demand*, *Peak Daily Demand*) as well as the charts and tables in **Tab 1** and **Tab 2**.
+3. **On-Demand Agent Execution:** When the user clicks **Run Forecast → Uncertainty → Inventory Planner** in **Tab 3**, `run_agent_workflow()` passes the historical series, forecast DataFrame, accuracy metrics, and policy parameters through the three agents, storing the output dictionary in `st.session_state["agent_result"]`.
+4. **Export & Diagnostics:** Planners can inspect the deterministic JSON payload and execution trace inside the expandable diagnostics drawer or export the future forecast schedule via **Download Forecast CSV**.
 
-## 7. Important limitations / next steps
+---
 
-This is a capstone starter, not a production inventory system.
+## 4. Running & Debugging in Visual Studio Code
 
-- Shock detection is a simple heuristic, not a validated change-point detector.
-- Prediction intervals use holdout residual standard deviation and are not calibrated conformal intervals.
-- Inventory formulas assume approximately independent daily errors and a known lead time.
-- No current stock, purchase orders, minimum order quantity, pack size, shelf-life, cost, promotions, weather or supplier constraints are included yet.
-- MAPE is unstable when actual demand is zero or close to zero.
-- Use rolling-origin backtesting and evaluate stockout rate, fill rate, holding cost, and waste before claiming business improvement.
-- NOAA weather data needs location/date alignment and a feature-engineering step before it can be used as a forecast feature.
+1. **Open the Workspace:**
+   * Launch VS Code and open the `Inventory-Optimization-System` folder (**File → Open Folder...**).
 
-## 8. Suggested project extensions
+2. **Select the Existing `venv` Interpreter:**
+   * Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS) and run **`Python: Select Interpreter`**.
+   * Choose the local virtual environment interpreter: `./venv/Scripts/python.exe` (Windows) or `./venv/bin/python` (macOS/Linux).
 
-- Add weather and promotion features with a feature table keyed by date/store/item.
-- Add a shock-aware model that blends a baseline with recent level/trend adjustment.
-- Use rolling-origin backtesting instead of one holdout split.
-- Add an inventory simulator that compares reorder policies under demand scenarios.
-- Add LangSmith tracing and structured Pydantic output schemas.
-- Add an audit log to SQLite for forecasts, shock alerts, recommendations, and human overrides.
-- Add tests for data validation, forecast metrics, shock thresholds, and reorder calculations.
+3. **Run via Integrated Terminal:**
+   * Open the VS Code terminal (``Ctrl+` ``) and run:
+     ```bash
+     streamlit run app.py
+     ```
+   * Open `http://localhost:8501` in your browser and optionally upload `Walmart_customized.csv` in the sidebar to test with real retail data.
+
+4. **One-Click Breakpoint Debugging (`F5`):**
+   * Create `.vscode/launch.json` in `Inventory-Optimization-System/` to debug `app.py` and `src/*.py` directly with breakpoints:
+     ```json
+     {
+       "version": "0.2.0",
+       "configurations": [
+         {
+           "name": "Run Inventory Optimization (Streamlit)",
+           "type": "debugpy",
+           "request": "launch",
+           "module": "streamlit",
+           "args": [
+             "run",
+             "${workspaceFolder}/app.py",
+             "--server.port",
+             "8501"
+           ],
+           "envFile": "${workspaceFolder}/.env",
+           "console": "integratedTerminal",
+           "justMyCode": true
+         }
+       ]
+     }
+     ```
+   * Press **`F5`** to launch the Streamlit server with `.env` loaded automatically.
+
+---
+
+## 5. Custom CSV Input Format
+
+When uploading `Walmart_customized.csv` or your own dataset via the sidebar file uploader, the CSV must include one recognized **date** column and one recognized **volume** column (case-insensitive):
+
+| Role | Accepted Column Names | Example Values |
+| :--- | :--- | :--- |
+| **Date** (Required) | `date`, `ds`, `day` | `2010-02-05`, `2024-01-15` |
+| **Demand** (Required) | `sales`, `demand`, `units_sold`, `quantity`, `y` | `49750740.50`, `142.5` |
+| **Metadata** (Optional) | `store`, `item`, `price`, `promo`, `temperature` | Automatically aggregated across rows per date |
